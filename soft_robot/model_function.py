@@ -1,3 +1,7 @@
+"""
+    建模的函数库文件
+"""
+
 import numpy as np
 import math
 

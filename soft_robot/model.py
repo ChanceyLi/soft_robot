@@ -1,8 +1,10 @@
+"""
+    建模文件
+"""
+
 import init
 import model_function
 import numpy as np
-
-# model about soft robot
 
 
 class Model(init.Parameters):

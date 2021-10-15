@@ -1,3 +1,7 @@
+"""
+    初始化文件，附带参数
+"""
+
 import numpy as np
 
 
