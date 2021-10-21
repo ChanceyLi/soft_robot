@@ -5,6 +5,20 @@
 import init
 import model_function
 import numpy as np
+import math
+import cvxopt
+
+
+# 原六轴机器人的相关参数以及约束条件，待修改成最新的六轴机器人与软体部分的参数以及约束
+a1, a2, a3, b1, b4, b6 = 32, 108, 20, 80, 176, 20  # 机器人DH参数
+upper = [100, 60, 50, 90, 40, 90]  # 机器人角度限制
+lower = [-100, -30, -50, -90, -90, -90]
+vMax = [31.0 * math.pi / 180, 65 * math.pi / 180, 28 * math.pi / 180,
+        110 * math.pi / 180, 33 * math.pi / 180, 66 * math.pi / 180]  # 机器人关节速度限制
+vMin = [-31.0 * math.pi / 180, -65 * math.pi / 180, -28 * math.pi / 180,
+        -110 * math.pi / 180, -33 * math.pi / 180, -66 * math.pi / 180]
+x0, y0, z0, z1 = 200, -100, 20, 40  # 表示像素点(0, 0)的对应世界坐标位置
+x_min, x_max, y_min, y_max, z_min, z_max = -50, 250, -150, 150, 0, 50  # 表示机器人末端的工作范围、约束
 
 
 class Model(init.Parameters):
@@ -31,6 +45,25 @@ class Model(init.Parameters):
 
         self.forward_matrix()
         self.jacobi()
+
+    def set_radian(self, theta, delta):
+        """
+        :param theta 前六轴的角度 delta 软体部分的变量
+        :更新模型中的角度[Theta1, Theta2, ..., Theta7]
+        """
+        self.theta[:6] = theta
+        self.__solve_delta(delta)
+
+    def __solve_delta(self, delta):
+        self.delta = delta
+        self.theta[6] = self.delta * self.__l / self.__d
+
+    def get_radian(self):
+        """
+        :param
+        :获取模型中的角度[Theta1, Theta2, ..., Theta7]
+        """
+        return self.theta
 
     def forward_matrix(self):
         """
@@ -63,17 +96,21 @@ class Model(init.Parameters):
             ttmp[3:, :3] = model_function.screw([tmp[0, 3], tmp[1, 3], tmp[2, 3]]) @ tmp[:3, :3]
             J[:, i:i+1] = ttmp @ self.S[i]
         self.J = J
+        return J
 
 
 def model_gurobi(queue):
+    """
+    :param queue 作为优化的目标运动路径（末端）
+    :利用cvx求解优化问题
+    """
     x0 = queue[0]
     N = len(queue) - 1
     XS = np.zeros((6 * N, 1), dtype=float)
     T = 0.1  # v = (x(i+1) - x(i)) / T
-    my_robot = Motivation()
-    my_robot.set_position(x0)
+    my_robot = Model([0, 0, 0, 0, 0, 0], delta=0.1)
     q = my_robot.get_radian()
-    J = my_robot.get_jacobi()
+    J = my_robot.jacobi()
     B = np.zeros((6 * N, 6 * N), dtype=float)
     I_N = np.zeros((6 * N, 6 * N), dtype=float)
     I = np.eye(6 * N, 6 * N)
@@ -139,3 +176,21 @@ def model_gurobi(queue):
     c = (X0 - XS).T @ B @ I_N
     u = cvxopt_solve_qp(Hess, c.T, G, B_, None, None)
     print(u)
+
+
+def func_opt(H, c):
+    v = lambda x: 1 / 2 * x.T @ H @ x + c @ x
+    return v
+
+
+def cvxopt_solve_qp(P, q, G=None, h=None, A=None, b=None):
+    P = .5 * (P + P.T)  # make sure P is symmetric
+    args = [cvxopt.matrix(P), cvxopt.matrix(q)]
+    if G is not None:
+        args.extend([cvxopt.matrix(G), cvxopt.matrix(h)])
+        if A is not None:
+            args.extend([cvxopt.matrix(A), cvxopt.matrix(b)])
+    sol = cvxopt.solvers.qp(*args)
+    if 'optimal' not in sol['status']:
+        return None
+    return np.array(sol['x'])

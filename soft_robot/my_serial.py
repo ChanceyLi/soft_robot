@@ -61,9 +61,9 @@ class SerialsMng():
             self.ser_arr.append(sop)
         print(self.ser_arr)
 
-    def setdata(self, idx, data):
-        sop = self.ser_arr[idx]
-        sop.d.setDataToArray(data)
+    # def setdata(self, idx, data):
+    #     sop = self.ser_arr[idx]
+    #     sop.d.setDataToArray(data)
 
     def setdataAndsend(self, idx, data):
 
@@ -76,43 +76,19 @@ class SerialsMng():
             # print(sop.d.buf)
             sop.serialSend()
 
-    def splitData(self, data, sidx=0, eidx=0):
-        b = eidx <= len(data) and sidx >= 0 and eidx - sidx > 0
-        if (b):
-            d = data[sidx:eidx]
-            return b, d
-        return False, []
+    def read_data(self):
+        res = []
+        for i in range(self.ser_count):
+            tmp = self.ser_arr[i].read(self.port.in_waiting)
+            res.append(tmp)
+        return res
 
-    def sendFrameData(self, data, pixstyle=4, width=45, height=15):
-        datlen = len(self.ser_arr)
-        # 每个串口设备控制一行
-        c = 0
-        u = pixstyle * width
-        # print(u)
-        for x in range(datlen):  #
-
-            # 获取切割的数据，发送到对应的节点
-            b, d = self.splitData(data, c * u, (c + 1) * u)
-            # print(c, c * u, (c + 1) * u,b,d)
-            if b:
-                # 串口发送1
-
-                self.setdataAndsend(x, d)
-            c += 1
-
-    def sendFrameData_splited(self, data):
-        dvclen = len(self.ser_arr)
-
-        datlen = len(data)
-        # 每个串口设备控制 data 一个子数组的数据
-        if dvclen < datlen:
-            datlen = dvclen
-        # print(u)
-        for x in range(datlen):  #
-            self.setdataAndsend(x, data[x])
-
-
-
+    # def splitData(self, data, sidx=0, eidx=0):
+    #     b = eidx <= len(data) and sidx >= 0 and eidx - sidx > 0
+    #     if (b):
+    #         d = data[sidx:eidx]
+    #         return b, d
+    #     return False, []
 
 
 class SerialOP():
@@ -124,6 +100,7 @@ class SerialOP():
         # baudRate =250000  # 波特率
         self.serialPort = serialPort
         self.baudRate = baudRate
+        self.busy = False
         self.createSer()
         self.d = FrameData(pixStyle, width, 1)
         t = threading.Thread(target=self.thread_autoReCreat)  # 自动连接串口线程
@@ -135,7 +112,6 @@ class SerialOP():
             self.ser = serial.Serial(self.serialPort, self.baudRate, timeout=0)  # !!!!!!!!!!!!!!!!!!!!!!!!!!无阻塞
             self.no_error = True
             print("参数设置：串口=%s ，波特率=%d" % (self.serialPort, self.baudRate))
-            self.busy = False
         except:
             self.no_error = False
             print("ERROE:参数设置：串口=%s ，波特率=%d" % (self.serialPort, self.baudRate))
@@ -222,40 +198,26 @@ class SerialOP():
             print("recv:\n")
             print(self.ser.readline())  # 可以接收中文
 
+def run_pos():
+    try:
+        # 端口，GNU / Linux上的/ dev / ttyUSB0 等 或 Windows上的 COM3 等
+        portx = "COM4"
+        # 波特率，标准值之一：50,75,110,134,150,200,300,600,1200,1800,2400,4800,9600,19200,38400,57600,115200
+        bps = 115200
+        # 超时设置,None：永远等待操作，0为立即返回请求结果，其他值为等待超时时间(单位为秒）
+        timex = 5
+        ser = serial.Serial(portx, bps, timeout=timex)
+        while (1):
+            print('舵机范围500-2500')
+            pos1 = input("输入舵机的位置：")
+            pos1_num = int(pos1)
+            if pos1_num <= 500:
+                pos1_num = 500
+            elif pos1_num >= 2500:
+                pos1_num = 2500
 
-if __name__ == "__main__":
-    def main():
-        # client socket
-        sop = SerialOP("COM3", 250000, 0x13, 45)
-        # 分别启动听和说线程
-        # t = threading.Thread(target=sop.thread_ssend)  # 注意当元组中只有一个元素的时候需要这样写, 否则会被认为是其原来的类型
-        # t.daemon=True
-        # t.start()
-
-        # t1 = threading.Thread(target=sop.thread_srecv)
-        # t1.daemon=True
-        # t1.start()
-        import time
-
-        while 1:
-            sop.testCreateDataToSend()
-            time.sleep(1)
-
-
-    # main()
-    sconfig = [["COM21", 250000, 0x13, 45], ["COM210", 250000, 0x13, 45]]  #
-    smng = SerialsMng(sconfig)
-    while 1:
-        # print(smng.ser_arr[0])
-        # smng.setdata(0, [0xff, 0, 0, 0xff, 0, 0, 0xff, 0, 0])
-
-        smng.setdataAndsend(0, [0xff, 0, 0, 0xff, 0, 0])
-        time.sleep(1)
-        smng.setdataAndsend(0, [0, 0xff, 0, 0, 0xff, 0])
-        time.sleep(1)
-        smng.setdataAndsend(0, [0, 0, 0xff, 0, 0, 0xff])
-        time.sleep(1)
-        smng.setdataAndsend(0, [0xff, 0xff, 0xff, 0xff, 0xff, 0xff])  # '''
-        time.sleep(1)
-        print('123')
-    # ser.close()
+            newstr = "#1P" + str(pos1_num) + "T100"
+            result = ser.write(newstr.encode("gbk"))
+            print("写总字节数:", result)
+    except Exception as e:
+        print("---异常---：", e)
