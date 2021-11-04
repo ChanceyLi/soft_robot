@@ -31,6 +31,20 @@ def T(omega, q, theta):
 
 def delta_vector(delta, l, d):
     ret = np.matrix([[0], [0], [0]], dtype=float)
-    ret[0] = (1 / delta - 1 / 2) * d * (1 - math.cos(delta * l / d))
-    ret[2] = (1 / delta - 1 / 2) * d * math.sin(delta * l / d)
+    if delta == 0:
+        ret[0] = 0
+        ret[2] = l
+    else:
+        ret[0] = (1 / delta - 1 / 2) * d * (1 - math.cos(delta * l / d))
+        ret[2] = (1 / delta - 1 / 2) * d * math.sin(delta * l / d)
     return ret
+
+
+def distance(x1, x2):
+    res = 0
+    for i in range(x1.shape[0]):
+        if i < 3:
+            res += abs(x1[i] - x2[i])
+        else:
+            res += abs(x1[i] - x2[i]) * 100
+    return res

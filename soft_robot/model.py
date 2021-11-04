@@ -8,62 +8,95 @@ import numpy as np
 import math
 import cvxopt
 
-
 # 原六轴机器人的相关参数以及约束条件，待修改成最新的六轴机器人与软体部分的参数以及约束
-a1, a2, a3, b1, b4, b6 = 32, 108, 20, 80, 176, 20  # 机器人DH参数
-upper = [100, 60, 50, 90, 40, 90]  # 机器人角度限制
-lower = [-100, -30, -50, -90, -90, -90]
-vMax = [31.0 * math.pi / 180, 65 * math.pi / 180, 28 * math.pi / 180,
-        110 * math.pi / 180, 33 * math.pi / 180, 66 * math.pi / 180]  # 机器人关节速度限制
-vMin = [-31.0 * math.pi / 180, -65 * math.pi / 180, -28 * math.pi / 180,
-        -110 * math.pi / 180, -33 * math.pi / 180, -66 * math.pi / 180]
-x0, y0, z0, z1 = 200, -100, 20, 40  # 表示像素点(0, 0)的对应世界坐标位置
+# a1, a2, a3, b1, b4, b6 = 32, 108, 20, 80, 176, 20  # 机器人DH参数
+qMax = np.matrix([[180], [115], [130], [180], [165], [180], [90]], dtype=float)  # 机器人角度限制
+qMin = -qMax
+vMax = np.matrix([[200], [200], [200], [200], [200], [200], [200]], dtype=float)  # 机器人关节速度限制
+vMin = -vMax
+qMax_r = qMax * math.pi / 180
+qMin_r = qMin * math.pi / 180
+vMax_r = vMax * math.pi / 180
+vMin_r = vMin * math.pi / 180
+# x0, y0, z0, z1 = 200, -100, 20, 40  # 表示像素点(0, 0)的对应世界坐标位置
 x_min, x_max, y_min, y_max, z_min, z_max = -50, 250, -150, 150, 0, 50  # 表示机器人末端的工作范围、约束
 
 
 class Model(init.Parameters):
-    theta = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    __theta = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    __Theta = [0, 0, 0, 0, 0, 0, 0]
     __d = 10  # soft body distance
     __l = 50  # soft body length
     delta = 0.1  # soft body length change rate
-    M_soft = np.matrix([4, 4], dtype=float)
     T = np.matrix([4, 4], dtype=float)
-    T_soft = np.matrix([4, 4], dtype=float)
     T_all = []
+    __pos = np.zeros((6, 1), dtype=float)
 
-    def __init__(self, theta, delta=0.1):
+    def __init__(self, theta, delta=0):
         super().__init__()
-        self.theta[:6] = theta
         self.delta = delta
-        self.theta[6] = self.delta * self.__l / self.__d
+        self.__theta[6] = self.delta * self.__l / self.__d
+        self.__theta = theta
         self.change_q7(model_function.delta_vector(self.delta, self.__l, self.__d))
-        self.M_soft = self.M.copy()
-        self.M_soft[:3, 3] = self.q[6]
         self.init_S()
-
+        for i in range(7):
+            self.__Theta[i] = int(self.__theta[i] * 180 / math.pi)
         self.J = np.zeros((6, len(self.omega)), dtype=float)
-
         self.forward_matrix()
-        self.jacobi()
+        self.jacobi_D()
 
-    def set_radian(self, theta, delta):
+    def set_radian_delta(self, theta, delta):
         """
         :param theta 前六轴的角度 delta 软体部分的变量
         :更新模型中的角度[Theta1, Theta2, ..., Theta7]
         """
-        self.theta[:6] = theta
+        self.__theta[:6] = theta
         self.__solve_delta(delta)
+        for i in range(6):
+            self.__Theta[i] = int(self.__theta[i] * 180 / math.pi)
+
+    def set_radians(self, theta):
+        """
+        :param theta 前六轴加软体部分的角度，共七个。
+        :更新模型角度
+        """
+        self.__theta = theta
+        self.delta = self.__theta[6] * self.__d / self.__l
+        for i in range(7):
+            self.__Theta[i] = int(self.__theta[i] * 180 / math.pi)
+        self.change_q7(model_function.delta_vector(self.delta, self.__l, self.__d))
+        self.init_S()
+
+    def set_calculation(self, theta):
+        self.set_radians(theta)
+        self.forward_matrix()
+        self.jacobi_D()
 
     def __solve_delta(self, delta):
         self.delta = delta
-        self.theta[6] = self.delta * self.__l / self.__d
+        self.__theta[6] = self.delta * self.__l / self.__d
+        self.__Theta[6] = int(self.__theta[6] * 180 / math.pi)
 
     def get_radian(self):
         """
         :param
+        :获取模型中的角度[theta1, theta2, ..., theta7]
+        """
+        return self.__theta
+
+    def get_angel(self):
+        """
+        :param
         :获取模型中的角度[Theta1, Theta2, ..., Theta7]
         """
-        return self.theta
+        return self.__Theta
+
+    def get_position(self):
+        """
+        :param
+        :获取模型中的末端执行器位置
+        """
+        return self.__pos
 
     def forward_matrix(self):
         """
@@ -72,21 +105,35 @@ class Model(init.Parameters):
         """
         T = []
         for i in range(len(self.omega)):
-            T.append(model_function.T(model_function.screw(self.omega[i]), self.q[i], self.theta[i]))
+            T.append(model_function.T(model_function.screw(self.omega[i]), self.q[i], self.__theta[i]))
 
-        Te = T[0] @ T[1] @ T[2] @ T[3] @ T[4] @ T[5] @ self.M
-        Te_soft = T[0] @ T[1] @ T[2] @ T[3] @ T[4] @ T[5] @ T[6] @ self.M_soft
+        Te_soft = T[0] @ T[1] @ T[2] @ T[3] @ T[4] @ T[5] @ T[6] @ self.M_all[6]
+        Te = T[0] @ T[1] @ T[2] @ T[3] @ T[4] @ T[5] @ self.M_all[5]
         self.T_all = T
-        self.T = Te
-        self.T_soft = Te_soft
+        self.T = Te_soft
+        beta = math.atan2(-self.T[2, 0], math.sqrt(self.T[0, 0] ** 2 + self.T[1, 0] ** 2))
+        if abs(beta - math.pi / 2) < 0.00001:
+            alpha = math.atan2(self.T[0, 1], self.T[1, 1])
+            gamma = 0
+        elif abs(beta + math.pi / 2) < 0.00001:
+            alpha = -math.atan2(self.T[0, 1], self.T[1, 1])
+            gamma = 0
+        else:
+            alpha = math.atan2(self.T[2, 1] / math.cos(beta), self.T[2, 2] / math.cos(beta))
+            gamma = math.atan2(self.T[1, 0] / math.cos(beta), self.T[0, 0] / math.cos(beta))
+        self.__pos[:3, 0] = self.T[:3, 3]
+        self.__pos[3, 0] = alpha
+        self.__pos[4, 0] = beta
+        self.__pos[5, 0] = gamma
+        # return Te
 
     def jacobi(self):
         """
         :param
         :雅可比矩阵
         """
-        J = np.zeros((6, len(self.omega)), dtype=float)
-        for i in range(len(self.omega)):
+        J = np.zeros((6, len(self.__theta)), dtype=float)
+        for i in range(len(self.__theta)):
             tmp = np.eye(4)
             for j in range(i):
                 tmp = tmp @ self.T_all[j]
@@ -94,88 +141,155 @@ class Model(init.Parameters):
             ttmp[:3, :3] = tmp[:3, :3]
             ttmp[3:, 3:] = tmp[:3, :3]
             ttmp[3:, :3] = model_function.screw([tmp[0, 3], tmp[1, 3], tmp[2, 3]]) @ tmp[:3, :3]
-            J[:, i:i+1] = ttmp @ self.S[i]
+            J[:, i:i + 1] = ttmp @ self.S[i]
+        # for i in range(len(self.theta)):
+        #     Tmp = np.eye(4)
+        #     for j in range(i+1):
+        #         Tmp = Tmp @ self.T_all[j]
+        #     Tmp = Tmp @ self.M_all[i]
+        #     p = Tmp[:3, 3]
+        #     J[:3, i] = model_function.screw(Tmp[:3, 2]) @ (self.pos[:3, 0] - p)
+        #     J[3:, i] = Tmp[:3, 2]
+        # self.J = J
+        return J
+
+    def jacobi_D(self):
+        delta = 0.001
+        th = self.__theta.copy()
+        pos = self.__pos.copy()
+        J = np.zeros((6, len(self.__theta)), dtype=float)
+        for i in range(len(self.__theta)):
+            tmp_theta = th.copy()
+            tmp_theta[i] += delta
+            self.set_radians(tmp_theta)
+            pos1 = self.__pos.copy()
+            tmp_theta = th.copy()
+            tmp_theta[i] -= delta
+            self.set_radians(tmp_theta)
+            pos2 = self.__pos.copy()
+            J[:, i:i + 1] = (pos1 - pos2) / (2 * delta)
+        self.set_radians(th)
+        self.forward_matrix()
         self.J = J
         return J
 
+    def jacobi_DH(self):
+        my_theta = [0, -math.pi / 2, math.pi / 2, 0, 0, 0]
+        sl = [1, 1, 1, 1, -1, 1]
+        for i in range(6):
+            my_theta[i] += sl[i] * self.__theta[i]
+        L1, L2, L3, L4 = 242.0, 225.0, 228.86, 50
+        c = [0, 0, 0, 0, 0, 0]
+        s = [0, 0, 0, 0, 0, 0]
+        for i in range(6):
+            c[i], s[i] = math.cos(my_theta[i]), math.sin(my_theta[i])
+        T01 = np.matrix([[c[0], -s[0], 0, 0],
+                         [s[0], c[0], 0, 0],
+                         [0, 0, 1, L1],
+                         [0, 0, 0, 1]], dtype=float)
+        T12 = np.matrix([[c[1], -s[1], 0, 0],
+                         [0, 0, 1, 0],
+                         [-s[1], -c[1], 0, 0],
+                         [0, 0, 0, 1]], dtype=float)
+        T23 = np.matrix([[c[2], -s[2], 0, L2],
+                         [s[2], c[2], 0, 0],
+                         [0, 0, 1, 0],
+                         [0, 0, 0, 1]], dtype=float)
+        T34 = np.matrix([[c[3], -s[3], 0, 0],
+                         [0, 0, -1, -L3],
+                         [s[3], c[3], 0, 0],
+                         [0, 0, 0, 1]], dtype=float)
+        T45 = np.matrix([[c[4], -s[4], 0, 0],
+                         [0, 0, -1, 0],
+                         [s[4], c[4], 0, 0],
+                         [0, 0, 0, 1]], dtype=float)
+        T56 = np.matrix([[c[5], -s[5], 0, 0],
+                         [0, 0, 1, L4],
+                         [-s[5], -c[5], 0, 0],
+                         [0, 0, 0, 1]], dtype=float)
+        T46 = T45 @ T56
+        T36 = T34 @ T46
+        T26 = T23 @ T36
+        T16 = T12 @ T26
+        T06 = T01 @ T16
+        J = np.zeros((6, 6), dtype=float)
+        J[3:, 0:1] = T06[2, :3].T
+        J[3:, 1:2] = T16[2, :3].T
+        J[3:, 2:3] = T26[2, :3].T
+        J[3:, 3:4] = T36[2, :3].T
+        J[3:, 4:5] = T46[2, :3].T
+        J[3:, 5:6] = T56[2, :3].T
+        for i in range(3):
+            J[i, 0] = T06[0, 3] * T06[1, i] - T06[1, 3] * T06[0, i]
+            J[i, 1] = T16[0, 3] * T16[1, i] - T16[1, 3] * T16[0, i]
+            J[i, 2] = T26[0, 3] * T26[1, i] - T26[1, 3] * T26[0, i]
+            J[i, 3] = T36[0, 3] * T36[1, i] - T36[1, 3] * T36[0, i]
+            J[i, 4] = T46[0, 3] * T46[1, i] - T46[1, 3] * T46[0, i]
+            J[i, 5] = T56[0, 3] * T56[1, i] - T56[1, 3] * T56[0, i]
+        return J
 
-def model_gurobi(queue):
-    """
-    :param queue 作为优化的目标运动路径（末端）
-    :利用cvx求解优化问题
-    """
-    x0 = queue[0]
-    N = len(queue) - 1
-    XS = np.zeros((6 * N, 1), dtype=float)
-    T = 0.1  # v = (x(i+1) - x(i)) / T
-    my_robot = Model([0, 0, 0, 0, 0, 0], delta=0.1)
-    q = my_robot.get_radian()
-    J = my_robot.jacobi()
-    B = np.zeros((6 * N, 6 * N), dtype=float)
-    I_N = np.zeros((6 * N, 6 * N), dtype=float)
-    I = np.eye(6 * N, 6 * N)
-    for i in range(N):
-        for j in range(N):
-            if i >= j:
-                B[6 * i:6 * i + 6, 6 * j:6 * j + 6] = T * J
-                I_N[6 * i:6 * i + 6, 6 * j:6 * j + 6] = np.eye(6, 6)
-    I_NN = I_N @ I_N
+    def model_opt(self, v_old, Yd, N=50, T=0.1, alpha=0.1):
+        """
+        :param v_old    (dim, 1)    表示上一次控制作用后的速度
+        :      Yd       (6 * N, 1)表示期望路径
+        :      N = 50   起始点到目标点 点的个数
+        :      T = 0.1  v = (x(i+1) - x(i)) / T
+        :利用cvx求解优化问题
+        """
+        x0 = self.__pos.copy()
+        dim = len(self.__theta)
 
-    X0 = np.zeros((6 * N, 1), dtype=float)
-    Q = np.zeros((6 * N, 1), dtype=float)
-    Lq = np.zeros((6 * N, 1), dtype=float)  # 角度约束
-    Hq = np.zeros((6 * N, 1), dtype=float)
-    Lw = np.zeros((6 * N, 1), dtype=float)  # 角速度约束
-    Hw = np.zeros((6 * N, 1), dtype=float)
-    for i in range(N):
-        for j in range(6):
-            X0[6 * i + j, 0] = x0[j]
-            XS[6 * i + j, 0] = queue[i + 1][j]
-            Q[6 * i + j, 0] = q[j]
-            Lq[6 * i + j, 0] = lower[j] * np.pi / 180
-            Hq[6 * i + j, 0] = upper[j] * np.pi / 180
-            Lw[6 * i + j, 0] = vMin[j]
-            Hw[6 * i + j, 0] = vMax[j]
-    Gq = np.zeros((12 * N, 6 * N), dtype=float)
-    Gq[:6 * N, ] = I_NN
-    Gq[6 * N:, ] = -I_NN
-    Bq = np.zeros((12 * N, 1), dtype=float)
-    Bq[:6 * N, ] = Hq - Q
-    Bq[6 * N:, ] = Q - Lq
-    Gw = np.zeros((12 * N, 6 * N), dtype=float)
-    Gw[:6 * N, ] = T * I_N
-    Gw[6 * N:, ] = -T * I_N
-    Bw = np.zeros((12 * N, 1), dtype=float)
-    Bw[:6 * N, ] = Hw
-    Bw[6 * N:, ] = -Lw
+        q0 = np.zeros((dim, 1), dtype=float)
+        for i in range(dim):
+            q0[i, 0] = self.__theta[i]
+        B = np.zeros((6 * N, dim * N), dtype=float)
+        I_N = np.zeros((dim * N, dim * N), dtype=float)
+        I = np.eye(dim * N, dim * N)
+        for i in range(N):
+            for j in range(N):
+                if i >= j:
+                    B[6 * i:6 * i + 6, dim * j:dim * j + dim] = T * self.J
+                    I_N[dim * i:dim * i + dim, dim * j:dim * j + dim] = np.eye(dim)
 
-    g_p = np.zeros((12, 6), dtype=float)
-    g_p[0:6, 0:6] = np.eye(6)
-    g_p[6:12, 0:6] = -np.eye(6)
-    b_p = np.matrix([[x_max], [y_max], [z_max], [0], [0], [0],
-                     [-x_min], [-y_min], [-z_min], [0], [0], [0]])
-    Gp = np.zeros((12 * N, 6 * N), dtype=float)  # 位置约束
-    Bp = np.zeros((12 * N, 1), dtype=float)
-    for i in range(N):
-        Gp[12 * i:12 * i + 12, 6 * i:6 * i + 6] = g_p
-        Bp[12 * i:12 * i + 12, ] = b_p
-    Bp = Bp - Gp @ X0
-    Gp = Gp @ B @ I_N
+        VMin = np.zeros((dim * N, 1), dtype=float)
+        VMax = np.zeros((dim * N, 1), dtype=float)
+        QMin = np.zeros((dim * N, 1), dtype=float)
+        QMax = np.zeros((dim * N, 1), dtype=float)
+        for i in range(N):
+            VMin[dim * i: dim * i + dim, ] = vMin_r - v_old
+            VMax[dim * i: dim * i + dim, ] = vMax_r - v_old
+            QMin[dim * i: dim * i + dim, ] = (qMin_r - q0 - T * v_old) / T
+            QMax[dim * i: dim * i + dim, ] = (qMax_r - q0 - T * v_old) / T
 
-    alpha = 1
-    G = np.zeros((36 * N, 6 * N), dtype=float)
-    G[:12 * N, ] = Gp
-    G[12 * N:24 * N, ] = Gq
-    G[24 * N:, ] = Gw
-    B_ = np.zeros((36 * N, 1), dtype=float)
-    B_[:12 * N, ] = Bp
-    B_[12 * N:24 * N, ] = Bq
-    B_[24 * N:, ] = Bw
-    # G_a, B_a = G.A, B_.A
-    Hess = (B @ I_N).T @ (B @ I_N) + alpha * I
-    c = (X0 - XS).T @ B @ I_N
-    u = cvxopt_solve_qp(Hess, c.T, G, B_, None, None)
-    print(u)
+        X0 = np.zeros((6 * N, 1), dtype=float)
+        V_old = np.zeros((dim * N, 1), dtype=float)
+        for i in range(N):
+            X0[6 * i: 6 * i + 6, ] = x0
+            V_old[dim * i: dim * i + dim, ] = v_old
+
+        G = np.zeros((4 * dim * N, dim * N), dtype=float)
+        B_ = np.zeros((4 * dim * N, 1), dtype=float)
+        for i in range(4):
+            if i == 0:
+                G[dim * N * i: dim * N * i + dim * N, ] = -I_N
+                B_[dim * N * i: dim * N * i + dim * N, ] = -VMin
+            elif i == 1:
+                G[dim * N * i: dim * N * i + dim * N, ] = I_N
+                B_[dim * N * i: dim * N * i + dim * N, ] = VMax
+            elif i == 2:
+                G[dim * N * i: dim * N * i + dim * N, ] = -I_N @ I_N
+                B_[dim * N * i: dim * N * i + dim * N, ] = -QMin
+            elif i == 3:
+                G[dim * N * i: dim * N * i + dim * N, ] = I_N @ I_N
+                B_[dim * N * i: dim * N * i + dim * N, ] = QMax
+
+        Hess = ((B @ I_N).T @ (B @ I_N)) + alpha * I
+        c = (X0 - Yd + B @ V_old).T @ B @ I_N
+        u = cvxopt_solve_qp(Hess, c.T, G, B_, None, None)
+        X_get = X0 + B @ I_N @ u
+        # print(X_get[6*N-6:, ])
+        # print(u)
+        return u, X_get
 
 
 def func_opt(H, c):

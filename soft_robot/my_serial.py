@@ -9,215 +9,51 @@ import struct
 from ctypes import create_string_buffer
 
 class Serial:
-    def __init__(self, band=115200, check='无校验位', data=8, stop=1):
-        self.port = None
-        self.port_list = list(serial.tools.list_ports.comports())
-        assert (len(self.port_list) != 0), '无可用串口'
-        self.bandRate = band
-        self.checkbit = check
-        self.databit = data
-        self.stopbit = stop
-
-        self.read_data = None
-        self.write_data = None
-
-    def show_port(self):
-        for i in range(len(self.port_list)):
-            print(self.port_list[i])
-
-    def get_port(self):
-        return self.port_list
-
-    def open_port(self, port):
-        self.port = serial.Serial(port, self.bandRate, timeout=None)
+    def __init__(self, port, band=115200, check='无校验位', timeout=2, bytesize=8, stopbits=1):
+        self.port = serial.Serial(port, band, timeout=timeout, bytesize=bytesize, stopbits=stopbits)
 
     def close_port(self):
         if self.port != None:
             self.port.close()
             print('串口关闭')
 
-    def read_data_func(self):
-        self.read_data = self.port.read(self.port.in_waiting)
-        return self.read_data.decode('utf-8')
+    def read_data_de(self):
+        return self.port.readline().decode()
 
-    def write_data_func(self, data):
+    def write_data_en(self, data):
         if not self.port.isOpen():
             print('串口未打开')
         else:
-            self.port.write(data.encode('utf-8'))
+            self.port.write(data.encode())
+
+    def read(self):
+        return self.port.read()
+
+    def write(self, data):
+        if not self.port.isOpen():
+            print('串口未打开')
+        else:
+            self.port.write(data)
 
 
-
-class SerialsMng():
-    # list=[name,bps,pixStyle,width,  name,bps,pixStyle,width, ]
-    # ["COM3",250000,0x13, 45, "COM4",250000,0x13, 45, ]
+class SerialsMny():
     def __init__(self, lst):
 
         self.ser_count = len(lst)
         self.ser_arr = []
         for i in range(self.ser_count):
-            sop = SerialOP(lst[i][0], lst[i][1], lst[i][2], lst[i][3])
-            print(lst[i][0], lst[i][1], lst[i][2], lst[i][3])
+            sop = Serial(lst[i])
+            print(lst[i])
             self.ser_arr.append(sop)
         print(self.ser_arr)
 
-    # def setdata(self, idx, data):
-    #     sop = self.ser_arr[idx]
-    #     sop.d.setDataToArray(data)
-
-    def setdataAndsend(self, idx, data):
+    def send_many(self, idx, data):
 
         sop = self.ser_arr[idx]
-        # print("xxxxxxxxxxxxxxxxxxx")
-        # print( data)
-        # print(sop.d.pkgLen)
-        if not sop.busy:
-            sop.d.setDataToArray(data)
-            # print(sop.d.buf)
-            sop.serialSend()
+        sop.write_data_en(data)
 
-    def read_data(self):
-        res = []
-        for i in range(self.ser_count):
-            tmp = self.ser_arr[i].read(self.port.in_waiting)
-            res.append(tmp)
-        return res
-
-    # def splitData(self, data, sidx=0, eidx=0):
-    #     b = eidx <= len(data) and sidx >= 0 and eidx - sidx > 0
-    #     if (b):
-    #         d = data[sidx:eidx]
-    #         return b, d
-    #     return False, []
+    def read_many(self, idx):
+        return self.ser_arr[idx].read_data_de()
 
 
-class SerialOP():
-    no_error = True
 
-    def __init__(self, serialPort, baudRate, pixStyle, width=45):
-        # 打开串口
-        # serialPort = "COM3"  # 串口
-        # baudRate =250000  # 波特率
-        self.serialPort = serialPort
-        self.baudRate = baudRate
-        self.busy = False
-        self.createSer()
-        self.d = FrameData(pixStyle, width, 1)
-        t = threading.Thread(target=self.thread_autoReCreat)  # 自动连接串口线程
-        t.daemon = True
-        t.start()
-
-    def createSer(self):
-        try:
-            self.ser = serial.Serial(self.serialPort, self.baudRate, timeout=0)  # !!!!!!!!!!!!!!!!!!!!!!!!!!无阻塞
-            self.no_error = True
-            print("参数设置：串口=%s ，波特率=%d" % (self.serialPort, self.baudRate))
-        except:
-            self.no_error = False
-            print("ERROE:参数设置：串口=%s ，波特率=%d" % (self.serialPort, self.baudRate))
-
-    def thread_autoReCreat(self):
-        while 1:
-            if (not self.no_error):
-                print("serail err relinking..")
-                try:
-                    self.createSer()
-                except:
-                    pass
-            time.sleep(1)
-
-    def serialSendData(self, dat):
-        datlen = len(dat)
-        packstyle = str(datlen) + 'B'  # B 0-255
-        req = struct.pack(packstyle, *dat)
-        if hasattr(self, 'ser'):
-            try:
-                self.ser.write(req)
-            except serial.serialutil.SerialException:
-                self.no_error = False
-
-    def serialSend(self):
-        if not self.busy:
-            if hasattr(self, 'ser'):
-                # print("serialSend")
-                try:
-                    self.busy = True
-                    self.ser.write(self.d.packBytes())
-                    self.busy = False
-                    # print( self.ser.readline())#read会阻塞
-                except serial.serialutil.SerialException:
-                    self.no_error = False
-
-    def testCreateDataToSend(self):
-        # print("init", d.buf)
-        # serialSendData(d.buf)
-        slp = 1
-        self.d.setDataToOn()
-        print("on", self.d.buf)
-        self.serialSendData(self.d.buf)
-        time.sleep(slp)
-        self.d.setDataToRGBW(255)
-        print("r", self.d.buf)
-        self.serialSendData(self.d.buf)
-        time.sleep(slp)
-        self.d.setDataToRGBW(0, 255)
-        print("g", self.d.buf)
-        self.serialSendData(self.d.buf)
-        time.sleep(slp)
-        self.d.setDataToRGBW(0, 0, 255)
-        print("b", self.d.buf)
-        self.serialSendData(self.d.buf)
-        time.sleep(slp)
-        # d.setDataToRGBW(0, 0, 0, 255)
-        # print("w", d.buf)
-        # serialSendData(d.buf)
-        # d.setDataToRGBW(255, 255, 255, 255)
-        # print("rgbw", d.buf)
-        # serialSendData(d.buf)
-
-    def thread_ssend(self):
-        # 收发数据
-        c = 0
-        while 1:
-
-            print(c)
-            self.testCreateDataToSend()
-
-            if (not self.no_error):
-                print("serail err relinking..")
-                try:
-                    self.createSer()
-                except:
-                    pass
-                time.sleep(1)
-            if c > 9999:
-                c = 0
-
-    def thread_srecv(self):
-        while 1:
-            print("recv:\n")
-            print(self.ser.readline())  # 可以接收中文
-
-def run_pos():
-    try:
-        # 端口，GNU / Linux上的/ dev / ttyUSB0 等 或 Windows上的 COM3 等
-        portx = "COM4"
-        # 波特率，标准值之一：50,75,110,134,150,200,300,600,1200,1800,2400,4800,9600,19200,38400,57600,115200
-        bps = 115200
-        # 超时设置,None：永远等待操作，0为立即返回请求结果，其他值为等待超时时间(单位为秒）
-        timex = 5
-        ser = serial.Serial(portx, bps, timeout=timex)
-        while (1):
-            print('舵机范围500-2500')
-            pos1 = input("输入舵机的位置：")
-            pos1_num = int(pos1)
-            if pos1_num <= 500:
-                pos1_num = 500
-            elif pos1_num >= 2500:
-                pos1_num = 2500
-
-            newstr = "#1P" + str(pos1_num) + "T100"
-            result = ser.write(newstr.encode("gbk"))
-            print("写总字节数:", result)
-    except Exception as e:
-        print("---异常---：", e)

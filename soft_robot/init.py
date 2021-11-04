@@ -8,27 +8,27 @@ import model_function
 
 class Parameters:
 
-    omega = [[0, 0, 1], [1, 0, 0], [1, 0, 0], [0, 0, 1], [1, 0, 0], [0, 0, 1], [0, 1, 0]]
+    omega = [[0, 0, 1], [0, 1, 0], [0, 1, 0], [0, 0, 1], [0, 1, 0], [0, 0, 1], [-1, 0, 0]]
     q = [np.matrix([[0], [0], [242]], dtype=float), np.matrix([[0], [0], [242]], dtype=float),
          np.matrix([[0], [0], [467]], dtype=float), np.matrix([[0], [0], [695.86]], dtype=float),
          np.matrix([[0], [0], [695.86]], dtype=float), np.matrix([[0], [0], [745.86]], dtype=float),
-         np.matrix([[0], [0], [745.86]], dtype=float)]
+         np.matrix([[0], [0], [795.86]], dtype=float)]
 
     S = [np.matrix([[0], [0], [0], [0], [0], [0]], dtype=float), np.matrix([[0], [0], [0], [0], [0], [0]], dtype=float),
          np.matrix([[0], [0], [0], [0], [0], [0]], dtype=float), np.matrix([[0], [0], [0], [0], [0], [0]], dtype=float),
          np.matrix([[0], [0], [0], [0], [0], [0]], dtype=float), np.matrix([[0], [0], [0], [0], [0], [0]], dtype=float),
          np.matrix([[0], [0], [0], [0], [0], [0]], dtype=float)]
 
-    M = np.matrix([[1, 0, 0, 0],
-                   [0, 1, 0, 0],
-                   [0, 0, 1, 745.86],
-                   [0, 0, 0, 1]], dtype=float)
+    M_all = []
+    for i in range(7):
+        M_all.append(np.eye(4))
+        M_all[i][:3, 3:4] = q[i]
 
     def __init__(self):
         pass
 
     def change_q7(self, dv):
-        self.q[6] = self.q[6] + dv
+        self.q[6] = self.q[5] + dv
 
     def init_S(self):
         for i in range(7):

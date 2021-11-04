@@ -8,41 +8,81 @@ import model
 import model_function
 import frame_data
 import math
-# Press the green button in the gutter to run the script.
+import control
+import serial
+from time import sleep
+import numpy as np
+import matplotlib.pyplot as plt
+
 if __name__ == '__main__':
     # client socket
-    sop = my_serial.SerialsMng([["COM4", 115200, 0x13, 45]])
-    init_gcode = ['G21\n', 'G90\n', 'G94\n', 'G00 A0 B0 C0 D0 X0 Y0 Z0\n']
-    m = model.Model([0, 0, 0, 0, 0, 0], delta=0.1)
-    theta = []
-    for i in range(7):
-        theta.append(int(m.get_radian() * 180 / math.pi))
-    run_gcode = 'G01 A' + str(theta[0]) + ' B' + str(theta[1]) + ' C' + str(theta[2]) + ' D' + str(theta[3]) + ' X' + \
-        str(theta[4]) + ' F2000\n'
-    run_gcode6 = 'M13.' + str(theta[5]).rjust(3, '0') + '\n'
+    # ctl = control.Control(lst=['COM5'])
+    # thetas = [[1.73, 0, 0, 0, 0, 0, 0.5], [0, 0, 0, 0, 0, 0, 0.5]]
+    # ctl.auto_run(thetas)
+    m = model.Model([0.1, 0.1, -0.1, 0.1, 0.1, 0.2, 0])
+    print(m.get_position())
+    # print(m.J)
+    # m.J[:, :6] = m.jacobi_DH()
+    # print(m.jacobi())
+    xs = np.matrix([[0], [0], [795.86], [0], [0], [0]], dtype=float)
+    x0 = m.get_position().copy()
+    v_old = np.zeros((7, 1), dtype=float)
+    M = 10  # 套娃的次数
+    N = 30  # 迭代的次数
+    T = 1
+    alpha = 1e-1
+    Xs = np.zeros((6, M), dtype=float)
+    Yd = np.zeros((6 * M + 6, 1), dtype=float)
+    Ys = np.zeros((6 * M + 6, 1), dtype=float)
+    X_get = np.zeros((6 * M + 6, 1), dtype=float)
+    Ys[:6, ] = x0
+    X_get[:6, ] = x0
+    for j in range(M + 1):
+        for k in range(6):
+            Yd[6 * j + k, 0] = (xs[k] - x0[k]) * j / M + x0[k]
+    for i in range(M):
+        for j in range(6):
+            Xs[j, i] = (xs[j] - x0[j]) * (i+1) / M + x0[j]
+    for i in range(M):
+        Yd_tmp = np.zeros((6 * N + 6, 1), dtype=float)
+        for j in range(N + 1):
+            for k in range(6):
+                Yd_tmp[6 * j + k, 0] = (Xs[k, i] - x0[k]) * j / N + x0[k]
+        # print(Yd)
+        u, X_get_tmp = m.model_opt(v_old, Yd_tmp[6:6*N+6, ], N, T, alpha)
+        X_get[6*i+6:6*i+12] = X_get_tmp[6*N-6:, ]
+        nu = m.get_radian().copy()
+        for j in range(1, N):
+            u[j*7:7*j+7] += u[j*7-7:7*j]
+        for j in range(N):
+            for k in range(7):
+                nu[k] += u[7 * j + k]*T
+            # print(nu)
+        m.set_radians(nu)
+        Ys[i*6+6:i*6+12, ] = m.get_position()
+        # print(n.get_position())
+        x0 = m.get_position().copy()
+        if model_function.distance(Ys[i*6:i*6:12, ], Yd[i*6+6:i*6+12:, ]) > 100:  # This maybe work
+            i -= 1
 
-    while True:
-        print('舵机范围500-2500')
-        pos1 = input("输入舵机的位置：")
-        pos1_num = int(pos1)
-        if pos1_num == -1:
-            break
-        if pos1_num <= 500:
-            pos1_num = 500
-        elif pos1_num >= 2500:
-            pos1_num = 2500
+    print(m.get_radian())
+    for i in range(6):
+        x = []
+        y1 = []
+        y2 = []
+        y3 = []
+        for j in range(M+1):
+            x.append(j)
+            y1.append(Yd[6*j+i])
+            y2.append(Ys[6*j+i])
+            y3.append(X_get[6*j+i])
+        plt.title('Change in the ' + str(i+1) + 'th dim')
+        plt.xlabel('iteration time')
+        plt.ylabel('position(mm)')
+        plt.plot(x, y1, 'b', label='expectation')
+        plt.plot(x, y2, 'r', label='real-fact')
+        plt.plot(x, y3, 'g', label='opt-fact')
+        plt.legend()
+        plt.show()
 
-        newstr = "#1P" + str(pos1_num) + "T100"
-        sop.setdataAndsend(0, newstr.encode("gbk"))
 
-    # 分别启动听和说线程
-    # t = threading.Thread(target=sop.thread_ssend)  # 注意当元组中只有一个元素的时候需要这样写, 否则会被认为是其原来的类型
-    # t.daemon=True
-    # t.start()
-
-    # t1 = threading.Thread(target=sop.thread_srecv)
-    # t1.daemon=True
-    # t1.start()
-    # my_serial.run_pos()
-
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/

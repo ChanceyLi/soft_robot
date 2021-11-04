@@ -10,5 +10,6 @@ import my_serial
 # m = model.Model([1, 0, 0, 0, 0, 0], 0.1)
 # print(m.J)
 
-s = my_serial.Serial(band=115200)
-print(s.get_port())
+m = model.Model([0.5, 0.5, 3, 4, 5, 6, 0])
+
+
