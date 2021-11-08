@@ -29,6 +29,7 @@ class Model(init.Parameters):
     __l = 50  # soft body length
     delta = 0.1  # soft body length change rate
     T = np.matrix([4, 4], dtype=float)
+    Te = np.matrix([4, 4], dtype=float)
     T_all = []
     __pos = np.zeros((6, 1), dtype=float)
 
@@ -109,6 +110,7 @@ class Model(init.Parameters):
 
         Te_soft = T[0] @ T[1] @ T[2] @ T[3] @ T[4] @ T[5] @ T[6] @ self.M_all[6]
         Te = T[0] @ T[1] @ T[2] @ T[3] @ T[4] @ T[5] @ self.M_all[5]
+        self.Te = Te
         self.T_all = T
         self.T = Te_soft
         beta = math.atan2(-self.T[2, 0], math.sqrt(self.T[0, 0] ** 2 + self.T[1, 0] ** 2))
@@ -308,3 +310,372 @@ def cvxopt_solve_qp(P, q, G=None, h=None, A=None, b=None):
     if 'optimal' not in sol['status']:
         return None
     return np.array(sol['x'])
+
+
+def inverse_kinematic(T, initial_theta):
+    L1, L2, L3, L4 = 242.0, 225.0, 228.86, 50
+    theta = [np.zeros((6, 1), dtype=float)]
+    px, py, pz = T[0, 3], T[1, 3], T[2, 3]
+    ox, oy, oz = T[0, 1], T[1, 1], T[2, 1]
+    ax, ay, az = T[0, 2], T[1, 2], T[2, 2]
+    theta[0][0] = math.atan2(py - L4 * ay, px - L4 * ax)
+    r12 = math.cos(theta[0][0]) * ox + math.sin(theta[0][0]) * oy
+    r22 = -math.sin(theta[0][0]) * ox + math.cos(theta[0][0]) * oy
+    r32 = oz
+    r13 = math.cos(theta[0][0]) * ax + math.sin(theta[0][0]) * ay
+    r23 = -math.sin(theta[0][0]) * ax + math.cos(theta[0][0]) * ay
+    r33 = az
+    qx = math.cos(theta[0][0]) * px + math.sin(theta[0][0]) * py
+    qy = -math.sin(theta[0][0]) * px + math.cos(theta[0][0]) * py
+    qz = pz - L1
+    k_tmp = ((qx - r13 * L4) ** 2 + (qz - r33 * L4) ** 2 - L2 ** 2 - L3 ** 2) / (2 * L2)
+    if L3**2 < k_tmp**2:
+        return initial_theta, 0
+    theta[0][2] = -math.atan2(k_tmp, math.sqrt(L3 ** 2 - k_tmp ** 2))
+    theta[0][1] = math.atan2((qx - r13 * L4) * (L2 * math.sin(theta[0][2]) - L3) -
+                             (qz - r33 * L4) * (L2 * math.cos(theta[0][2])),
+                             (qx - r13 * L4) * (L2 * math.cos(theta[0][2])) +
+                             (qz - r33 * L4) * (L2 * math.sin(theta[0][2]) - L3)) - theta[0][2]
+
+    if theta[0][1] > math.pi:
+        theta[0][1] = theta[0][1] - 2 * math.pi
+    if theta[0][1] < -math.pi:
+        theta[0][1] = theta[0][1] + 2 * math.pi
+    DOUBLE_ABS_MIN = 1e-10
+    if abs(r23) < DOUBLE_ABS_MIN and abs(r33 * math.sin(theta[0][1] + theta[0][2]) - r13 * math.cos(theta[0][1] +
+                                         theta[0][2])) < DOUBLE_ABS_MIN:
+        theta[0][4] = 0
+        theta[0][3] = 0
+    else:
+        theta[0][3] = math.atan2(r23, r33 * math.sin(theta[0][1] + theta[0][2]) -
+                                 r13 * math.cos(theta[0][1] + theta[0][2]))
+        if abs(math.sin(theta[0][3])) < 0.01:
+            theta[0][4] = math.atan2((r33 * math.sin(theta[0][1] + theta[0][2]) -
+                                      r13 * math.cos(theta[0][1] + theta[0][2])) / math.cos(theta[0][3]),
+                                     -r13 * math.sin(theta[0][1] + theta[0][2]) -
+                                     r33 * math.cos((theta[0][1] + theta[0][2])))
+        else:
+            theta[0][4] = math.atan2(r23 / math.sin(theta[0][3]),
+                                     -r13 * math.sin(theta[0][1] + theta[0][2]) -
+                                     r33 * math.cos((theta[0][1] + theta[0][2])))
+    if abs(math.sin(theta[0][4])) < 0.01:
+        theta[0][5] = math.atan2((r22 * math.sin(theta[0][3]) +
+                                  math.cos(theta[0][3]) * (r32 * math.sin(theta[0][1] + theta[0][2]) -
+                                                           r12 * math.cos(theta[0][1] + theta[0][2]))) /
+                                 math.cos(theta[0][4]),
+                                 math.sin(theta[0][3]) * (r32 * math.sin(theta[0][1] + theta[0][2]) -
+                                                          r12 * math.cos(theta[0][1] + theta[0][2])) -
+                                 math.cos(theta[0][3]) * r22)
+    else:
+        theta[0][5] = math.atan2((r12 * math.sin(theta[0][1] + theta[0][2]) +
+                                  r32 * math.cos(theta[0][1] + theta[0][2])) / math.sin(theta[0][4]),
+                                 math.sin(theta[0][3]) * (r32 * math.sin(theta[0][1] + theta[0][2]) -
+                                                          r12 * math.cos(theta[0][1] + theta[0][2])) -
+                                 math.cos(theta[0][3]) * r22)
+
+    # -----
+    theta.append(theta[0].copy())
+
+    if theta[1][3] > 0:
+        theta[1][3] = theta[1][3] - math.pi
+    else:
+        theta[1][3] = theta[1][3] + math.pi
+
+    if abs(math.sin(theta[1][3])) < 0.01:
+        theta[1][4] = math.atan2((r33 * math.sin(theta[1][1] + theta[1][2]) -
+                                  r13 * math.cos(theta[1][1] + theta[1][2])) / math.cos(theta[1][3]),
+                                 -r13 * math.sin(theta[1][1] + theta[1][2]) -
+                                 r33 * math.cos(theta[1][1] + theta[1][2]))
+    else:
+        theta[1][4] = math.atan2(r23 / math.sin(theta[1][3]),
+                                 -r13 * math.sin(theta[1][1] + theta[1][2]) -
+                                 r33 * math.cos(theta[1][1] + theta[1][2]))
+    if abs(math.sin(theta[1][4])) < 0.01:
+        theta[1][5] = math.atan2((r22 * math.sin(theta[1][3]) +
+                                  math.cos(theta[1][3]) * (r32 * math.sin(theta[1][1] + theta[1][2]) -
+                                                           r12 * math.cos(theta[1][1] + theta[1][2]))) /
+                                 math.cos(theta[1][4]),
+                                 math.sin(theta[1][3]) * (r32 * math.sin(theta[1][1] + theta[1][2]) -
+                                                          r12 * math.cos(theta[1][1] + theta[1][2])) -
+                                 math.cos(theta[1][3]) * r22)
+    else:
+        theta[1][5] = math.atan2((r12 * math.sin(theta[1][1] + theta[1][2]) +
+                                  r32 * math.cos(theta[1][1] + theta[1][2])) / math.sin(theta[1][4]),
+                                 math.sin(theta[1][3]) * (r32 * math.sin(theta[1][1] + theta[1][2]) -
+                                                          r12 * math.cos(theta[1][1] + theta[1][2])) -
+                                 math.cos(theta[1][3]) * r22)
+
+    # -----
+    theta.append(theta[1].copy())
+
+    theta[2][2] = -math.atan2(k_tmp, -math.sqrt(L3 ** 2 - k_tmp ** 2))
+    theta[2][1] = math.atan2((qx - r13 * L4) * (L2 * math.sin(theta[2][2]) - L3) -
+                             (qz - r33 * L4) * (L2 * math.cos(theta[2][2])),
+                             (qx - r13 * L4) * (L2 * math.cos(theta[2][2])) +
+                             (qz - r33 * L4) * (L2 * math.sin(theta[2][2]) - L3)) - theta[2][2]
+    if theta[2][1] > math.pi:
+        theta[2][1] = theta[2][1] - 2 * math.pi
+    if theta[2][1] < -math.pi:
+        theta[2][1] = theta[2][1] + 2 * math.pi
+
+    if abs(r23) < DOUBLE_ABS_MIN and abs(r33 * math.sin(theta[2][1] + theta[2][2]) - r13 * math.cos(theta[2][1] +
+                                         theta[2][2])) < DOUBLE_ABS_MIN:
+        theta[2][4] = 0
+        theta[2][3] = 0
+    else:
+        theta[2][3] = math.atan2(r23, r33 * math.sin(theta[2][1] + theta[2][2]) -
+                                 r13 * math.cos(theta[2][1] + theta[2][2]))
+        if abs(math.sin(theta[2][3])) < 0.01:
+            theta[2][4] = math.atan2((r33 * math.sin(theta[2][1] + theta[2][2]) -
+                                      r13 * math.cos(theta[2][1] + theta[2][2])) / math.cos(theta[2][3]),
+                                     -r13 * math.sin(theta[2][1] + theta[2][2]) -
+                                     r33 * math.cos((theta[2][1] + theta[2][2])))
+        else:
+            theta[2][4] = math.atan2(r23 / math.sin(theta[2][3]),
+                                     -r13 * math.sin(theta[2][1] + theta[2][2]) -
+                                     r33 * math.cos((theta[2][1] + theta[2][2])))
+    if abs(math.sin(theta[2][4])) < 0.01:
+        theta[2][5] = math.atan2((r22 * math.sin(theta[2][3]) +
+                                  math.cos(theta[2][3]) * (r32 * math.sin(theta[2][1] + theta[2][2]) -
+                                                           r12 * math.cos(theta[2][1] + theta[2][2]))) /
+                                 math.cos(theta[2][4]),
+                                 math.sin(theta[2][3]) * (r32 * math.sin(theta[2][1] + theta[2][2]) -
+                                                          r12 * math.cos(theta[2][1] + theta[2][2])) -
+                                 math.cos(theta[2][3]) * r22)
+    else:
+        theta[2][5] = math.atan2((r12 * math.sin(theta[2][1] + theta[2][2]) +
+                                  r32 * math.cos(theta[2][1] + theta[2][2])) / math.sin(theta[2][4]),
+                                 math.sin(theta[2][3]) * (r32 * math.sin(theta[2][1] + theta[2][2]) -
+                                                          r12 * math.cos(theta[2][1] + theta[2][2])) -
+                                 math.cos(theta[2][3]) * r22)
+
+    # -----
+    theta.append(theta[2].copy())
+    if theta[3][3] > 0:
+        theta[3][3] = theta[3][3] - math.pi
+    else:
+        theta[3][3] = theta[3][3] + math.pi
+
+    if abs(math.sin(theta[3][3])) < 0.01:
+        theta[3][4] = math.atan2((r33 * math.sin(theta[3][1] + theta[3][2]) -
+                                  r13 * math.cos(theta[3][1] + theta[3][2])) / math.cos(theta[3][3]),
+                                 -r13 * math.sin(theta[3][1] + theta[3][2]) -
+                                 r33 * math.cos(theta[3][1] + theta[3][2]))
+    else:
+        theta[3][4] = math.atan2(r23 / math.sin(theta[3][3]),
+                                 -r13 * math.sin(theta[3][1] + theta[3][2]) -
+                                 r33 * math.cos(theta[3][1] + theta[3][2]))
+    if abs(math.sin(theta[3][4])) < 0.01:
+        theta[3][5] = math.atan2((r22 * math.sin(theta[3][3]) +
+                                  math.cos(theta[3][3]) * (r32 * math.sin(theta[3][1] + theta[3][2]) -
+                                                           r12 * math.cos(theta[3][1] + theta[3][2]))) /
+                                 math.cos(theta[3][4]),
+                                 math.sin(theta[3][3]) * (r32 * math.sin(theta[3][1] + theta[3][2]) -
+                                                          r12 * math.cos(theta[3][1] + theta[3][2])) -
+                                 math.cos(theta[3][3]) * r22)
+    else:
+        theta[3][5] = math.atan2((r12 * math.sin(theta[3][1] + theta[3][2]) +
+                                  r32 * math.cos(theta[3][1] + theta[3][2])) / math.sin(theta[3][4]),
+                                 math.sin(theta[3][3]) * (r32 * math.sin(theta[3][1] + theta[3][2]) -
+                                                          r12 * math.cos(theta[3][1] + theta[3][2])) -
+                                 math.cos(theta[3][3]) * r22)
+
+    # -----
+    theta.append(theta[3].copy())
+    if theta[4][0] > 0:
+        theta[4][0] = theta[4][0] - math.pi
+    else:
+        theta[4][0] = theta[4][0] + math.pi
+    r12 = math.cos(theta[4][0]) * ox + math.sin(theta[4][0]) * oy
+    r22 = -math.sin(theta[4][0]) * ox + math.cos(theta[4][0]) * oy
+    r32 = oz
+    r13 = math.cos(theta[4][0]) * ax + math.sin(theta[4][0]) * ay
+    r23 = -math.sin(theta[4][0]) * ax + math.cos(theta[4][0]) * ay
+    r33 = az
+    qx = math.cos(theta[4][0]) * px + math.sin(theta[4][0]) * py
+    qy = -math.sin(theta[4][0]) * px + math.cos(theta[4][0]) * py
+    qz = pz - L1
+    k_tmp = ((qx - r13 * L4) ** 2 + (qz - r33 * L4) ** 2 - L2 ** 2 - L3 ** 2) / (2 * L2)
+
+    theta[4][2] = math.atan2(0, L3) - math.atan2(k_tmp, math.sqrt(L3 ** 2 - k_tmp ** 2))
+    theta[4][1] = math.atan2((qx - r13 * L4) * (L2 * math.sin(theta[4][2]) - L3) -
+                             (qz - r33 * L4) * (L2 * math.cos(theta[4][2])),
+                             (qx - r13 * L4) * (L2 * math.cos(theta[4][2])) +
+                             (qz - r33 * L4) * (L2 * math.sin(theta[4][2]) - L3)) - theta[4][2]
+    if theta[4][1] > math.pi:
+        theta[4][1] = theta[4][1] - 2 * math.pi
+    if theta[4][1] < -math.pi:
+        theta[4][1] = theta[4][1] + 2 * math.pi
+    if abs(r23) < DOUBLE_ABS_MIN and abs(r33 * math.sin(theta[4][1] + theta[4][2]) - r13 * math.cos(theta[4][1] +
+                                         theta[4][2])) < DOUBLE_ABS_MIN:
+        theta[4][4] = 0
+        theta[4][3] = 0
+    else:
+        theta[4][3] = math.atan2(r23, r33 * math.sin(theta[4][1] + theta[4][2]) -
+                                 r13 * math.cos(theta[4][1] + theta[4][2]))
+        if abs(math.sin(theta[4][3])) < 0.01:
+            theta[4][4] = math.atan2((r33 * math.sin(theta[4][1] + theta[4][2]) -
+                                      r13 * math.cos(theta[4][1] + theta[4][2])) / math.cos(theta[4][3]),
+                                     -r13 * math.sin(theta[4][1] + theta[4][2]) -
+                                     r33 * math.cos((theta[4][1] + theta[4][2])))
+        else:
+            theta[4][4] = math.atan2(r23 / math.sin(theta[4][3]),
+                                     -r13 * math.sin(theta[4][1] + theta[4][2]) -
+                                     r33 * math.cos((theta[4][1] + theta[4][2])))
+    if abs(math.sin(theta[4][4])) < 0.01:
+        theta[4][5] = math.atan2((r22 * math.sin(theta[4][3]) +
+                                  math.cos(theta[4][3]) * (r32 * math.sin(theta[4][1] + theta[4][2]) -
+                                                           r12 * math.cos(theta[4][1] + theta[4][2]))) /
+                                 math.cos(theta[4][4]),
+                                 math.sin(theta[4][3]) * (r32 * math.sin(theta[4][1] + theta[4][2]) -
+                                                          r12 * math.cos(theta[4][1] + theta[4][2])) -
+                                 math.cos(theta[4][3]) * r22)
+    else:
+        theta[4][5] = math.atan2((r12 * math.sin(theta[4][1] + theta[4][2]) +
+                                  r32 * math.cos(theta[4][1] + theta[4][2])) / math.sin(theta[4][4]),
+                                 math.sin(theta[4][3]) * (r32 * math.sin(theta[4][1] + theta[4][2]) -
+                                                          r12 * math.cos(theta[4][1] + theta[4][2])) -
+                                 math.cos(theta[4][3]) * r22)
+    # -----
+    theta.append(theta[4].copy())
+
+    if theta[5][3] > 0:
+        theta[5][3] = theta[5][3] - math.pi
+    else:
+        theta[5][3] = theta[5][3] + math.pi
+
+    if abs(math.sin(theta[5][3])) < 0.01:
+        theta[5][4] = math.atan2((r33 * math.sin(theta[5][1] + theta[5][2]) -
+                                  r13 * math.cos(theta[5][1] + theta[5][2])) / math.cos(theta[5][3]),
+                                 -r13 * math.sin(theta[5][1] + theta[5][2]) -
+                                 r33 * math.cos(theta[5][1] + theta[5][2]))
+    else:
+        theta[5][4] = math.atan2(r23 / math.sin(theta[5][3]),
+                                 -r13 * math.sin(theta[5][1] + theta[5][2]) -
+                                 r33 * math.cos(theta[5][1] + theta[5][2]))
+    if abs(math.sin(theta[5][4])) < 0.01:
+        theta[5][5] = math.atan2((r22 * math.sin(theta[5][3]) +
+                                  math.cos(theta[5][3]) * (r32 * math.sin(theta[5][1] + theta[5][2]) -
+                                                           r12 * math.cos(theta[5][1] + theta[5][2]))) /
+                                 math.cos(theta[5][4]),
+                                 math.sin(theta[5][3]) * (r32 * math.sin(theta[5][1] + theta[5][2]) -
+                                                          r12 * math.cos(theta[5][1] + theta[5][2])) -
+                                 math.cos(theta[5][3]) * r22)
+    else:
+        theta[5][5] = math.atan2((r12 * math.sin(theta[5][1] + theta[5][2]) +
+                                  r32 * math.cos(theta[5][1] + theta[5][2])) / math.sin(theta[5][4]),
+                                 math.sin(theta[5][3]) * (r32 * math.sin(theta[5][1] + theta[5][2]) -
+                                                          r12 * math.cos(theta[5][1] + theta[5][2])) -
+                                 math.cos(theta[5][3]) * r22)
+
+    # -----
+    theta.append(theta[5])
+
+    theta[6][2] = -math.atan2(k_tmp, -math.sqrt(L3 ** 2 - k_tmp ** 2))
+    theta[6][1] = math.atan2((qx - r13 * L4) * (L2 * math.sin(theta[6][2]) - L3) -
+                             (qz - r33 * L4) * (L2 * math.cos(theta[6][2])),
+                             (qx - r13 * L4) * (L2 * math.cos(theta[6][2])) +
+                             (qz - r33 * L4) * (L2 * math.sin(theta[6][2]) - L3)) - theta[6][2]
+    if theta[6][1] > math.pi:
+        theta[6][1] = theta[6][1] - 2 * math.pi
+    if theta[6][1] < -math.pi:
+        theta[6][1] = theta[6][1] + 2 * math.pi
+
+    if abs(r23) < DOUBLE_ABS_MIN and abs(r33 * math.sin(theta[6][1] + theta[6][2]) - r13 * math.cos(theta[6][1] +
+                                         theta[6][2])) < DOUBLE_ABS_MIN:
+        theta[6][4] = 0
+        theta[6][3] = 0
+    else:
+        theta[6][3] = math.atan2(r23, r33 * math.sin(theta[6][1] + theta[6][2]) -
+                                 r13 * math.cos(theta[6][1] + theta[6][2]))
+        if abs(math.sin(theta[6][3])) < 0.01:
+            theta[6][4] = math.atan2((r33 * math.sin(theta[6][1] + theta[6][2]) -
+                                      r13 * math.cos(theta[6][1] + theta[6][2])) / math.cos(theta[6][3]),
+                                     -r13 * math.sin(theta[6][1] + theta[6][2]) -
+                                     r33 * math.cos((theta[6][1] + theta[6][2])))
+        else:
+            theta[6][4] = math.atan2(r23 / math.sin(theta[6][3]),
+                                     -r13 * math.sin(theta[6][1] + theta[6][2]) -
+                                     r33 * math.cos((theta[6][1] + theta[6][2])))
+    if abs(math.sin(theta[6][4])) < 0.01:
+        theta[6][5] = math.atan2((r22 * math.sin(theta[6][3]) +
+                                  math.cos(theta[6][3]) * (r32 * math.sin(theta[6][1] + theta[6][2]) -
+                                                           r12 * math.cos(theta[6][1] + theta[6][2]))) /
+                                 math.cos(theta[6][4]),
+                                 math.sin(theta[6][3]) * (r32 * math.sin(theta[6][1] + theta[6][2]) -
+                                                          r12 * math.cos(theta[6][1] + theta[6][2])) -
+                                 math.cos(theta[6][3]) * r22)
+    else:
+        theta[6][5] = math.atan2((r12 * math.sin(theta[6][1] + theta[6][2]) +
+                                  r32 * math.cos(theta[6][1] + theta[6][2])) / math.sin(theta[6][4]),
+                                 math.sin(theta[6][3]) * (r32 * math.sin(theta[6][1] + theta[6][2]) -
+                                                          r12 * math.cos(theta[6][1] + theta[6][2])) -
+                                 math.cos(theta[6][3]) * r22)
+
+    # -----
+    theta.append(theta[6].copy())
+    if theta[7][3] > 0:
+        theta[7][3] = theta[7][3] - math.pi
+    else:
+        theta[7][3] = theta[7][3] + math.pi
+
+    if abs(math.sin(theta[7][3])) < 0.01:
+        theta[7][4] = math.atan2((r33 * math.sin(theta[7][1] + theta[7][2]) -
+                                  r13 * math.cos(theta[7][1] + theta[7][2])) / math.cos(theta[7][3]),
+                                 -r13 * math.sin(theta[7][1] + theta[7][2]) -
+                                 r33 * math.cos(theta[7][1] + theta[7][2]))
+    else:
+        theta[7][4] = math.atan2(r23 / math.sin(theta[7][3]),
+                                 -r13 * math.sin(theta[7][1] + theta[7][2]) -
+                                 r33 * math.cos(theta[7][1] + theta[7][2]))
+    if abs(math.sin(theta[7][4])) < 0.01:
+        theta[7][5] = math.atan2((r22 * math.sin(theta[7][3]) +
+                                  math.cos(theta[7][3]) * (r32 * math.sin(theta[7][1] + theta[7][2]) -
+                                                           r12 * math.cos(theta[7][1] + theta[7][2]))) /
+                                 math.cos(theta[7][4]),
+                                 math.sin(theta[7][3]) * (r32 * math.sin(theta[7][1] + theta[7][2]) -
+                                                          r12 * math.cos(theta[7][1] + theta[7][2])) -
+                                 math.cos(theta[7][3]) * r22)
+    else:
+        theta[7][5] = math.atan2((r12 * math.sin(theta[7][1] + theta[7][2]) +
+                                  r32 * math.cos(theta[7][1] + theta[7][2])) / math.sin(theta[7][4]),
+                                 math.sin(theta[7][3]) * (r32 * math.sin(theta[7][1] + theta[7][2]) -
+                                                          r12 * math.cos(theta[7][1] + theta[7][2])) -
+                                 math.cos(theta[7][3]) * r22)
+
+    d_theta = np.matrix([[0], [math.pi / 2], [math.pi / 2], [math.pi], [0], [0]], dtype=float)
+    for i in range(len(theta)):
+        theta[i] = theta[i] + d_theta
+        theta[i][4] = -theta[i][4]
+        for j in range(6):
+            if theta[i][j] > math.pi:
+                theta[i][j] = theta[i][j] - 2 * math.pi
+            if theta[i][j] < -math.pi:
+                theta[i][j] = theta[i][j] + 2 * math.pi
+    # print(theta)
+    res = []
+    for i in range(len(theta)):
+        flag = True
+        for j in range(6):
+            if theta[i][j] >= qMax_r[j] or theta[i][j] <= qMin_r[j]:
+                flag = False
+                break
+        if flag:
+            res.append(theta[i])
+            # return theta[i]
+    # print(res)
+    if len(res) > 0:
+        m = []
+        for i in range(len(res)):
+            tmp = 0
+            for j in range(len(initial_theta)):
+                tmp += (res[i][j] - initial_theta[j]) ** 2
+            m.append(tmp)
+        min_ = m[0]
+        index = 0
+        for i in range(len(m)):
+            if m[i] < min_:
+                min_ = m[i]
+                index = i
+        return res[index], 1
+    return initial_theta, 0

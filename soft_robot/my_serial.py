@@ -7,6 +7,7 @@ import serial.tools.list_ports
 from frame_data import FrameData
 import struct
 from ctypes import create_string_buffer
+import mcush
 
 class Serial:
     def __init__(self, port, band=115200, check='无校验位', timeout=2, bytesize=8, stopbits=1):
