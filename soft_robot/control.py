@@ -22,7 +22,7 @@ class Control(my_serial.SerialsMny):
     def __init__(self, lst):
         super().__init__(lst)
         self.init_code = ['30', '10', '14']
-        self.m = model.Model([0, 0, 0, 0, 0, 0, 0], delta=0.1)
+        self.m = model.Model([0, 0, 0, 0, 0, 0, 0])
         self.__slope = 11.111  # 表示软体部分角度与控制舵机角度数值间的比值
         self.__gap = 1500  # 表示软体部分角度与控制舵机角度数值间的差值
 

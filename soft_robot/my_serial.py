@@ -7,11 +7,12 @@ import serial.tools.list_ports
 from frame_data import FrameData
 import struct
 from ctypes import create_string_buffer
-import mcush
+
 
 class Serial:
-    def __init__(self, port, band=115200, check='无校验位', timeout=2, bytesize=8, stopbits=1):
-        self.port = serial.Serial(port, band, timeout=timeout, bytesize=bytesize, stopbits=stopbits)
+    def __init__(self, port=None, band=115200, check='无校验位', timeout=2, bytesize=8, stopbits=1):
+        if port is not None:
+            self.port = serial.Serial(port, band, timeout=timeout, bytesize=bytesize, stopbits=stopbits)
 
     def close_port(self):
         if self.port != None:
@@ -38,15 +39,15 @@ class Serial:
 
 
 class SerialsMny():
-    def __init__(self, lst):
-
-        self.ser_count = len(lst)
-        self.ser_arr = []
-        for i in range(self.ser_count):
-            sop = Serial(lst[i])
-            print(lst[i])
-            self.ser_arr.append(sop)
-        print(self.ser_arr)
+    def __init__(self, lst=None):
+        if lst is not None:
+            self.ser_count = len(lst)
+            self.ser_arr = []
+            for i in range(self.ser_count):
+                sop = Serial(lst[i])
+                print(lst[i])
+                self.ser_arr.append(sop)
+            print(self.ser_arr)
 
     def send_many(self, idx, data):
 

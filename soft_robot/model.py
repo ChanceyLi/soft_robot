@@ -25,20 +25,19 @@ x_min, x_max, y_min, y_max, z_min, z_max = -50, 250, -150, 150, 0, 50  # 表示�
 class Model(init.Parameters):
     __theta = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     __Theta = [0, 0, 0, 0, 0, 0, 0]
-    __d = 10  # soft body distance
-    __l = 50  # soft body length
+    D = 10  # soft body distance
+    L = 50  # soft body length
     delta = 0.1  # soft body length change rate
     T = np.matrix([4, 4], dtype=float)
     Te = np.matrix([4, 4], dtype=float)
     T_all = []
     __pos = np.zeros((6, 1), dtype=float)
 
-    def __init__(self, theta, delta=0):
+    def __init__(self, theta):
         super().__init__()
-        self.delta = delta
-        self.__theta[6] = self.delta * self.__l / self.__d
         self.__theta = theta
-        self.change_q7(model_function.delta_vector(self.delta, self.__l, self.__d))
+        self.delta = self.__theta[6] * self.D / self.L
+        self.change_q7(model_function.delta_vector(self.delta, self.L, self.D))
         self.init_S()
         for i in range(7):
             self.__Theta[i] = int(self.__theta[i] * 180 / math.pi)
@@ -62,20 +61,20 @@ class Model(init.Parameters):
         :更新模型角度
         """
         self.__theta = theta
-        self.delta = self.__theta[6] * self.__d / self.__l
+        self.delta = self.__theta[6] * self.D / self.L
         for i in range(7):
             self.__Theta[i] = int(self.__theta[i] * 180 / math.pi)
-        self.change_q7(model_function.delta_vector(self.delta, self.__l, self.__d))
+        self.change_q7(model_function.delta_vector(self.delta, self.L, self.D))
         self.init_S()
+        self.forward_matrix()
 
     def set_calculation(self, theta):
         self.set_radians(theta)
-        self.forward_matrix()
         self.jacobi_D()
 
     def __solve_delta(self, delta):
         self.delta = delta
-        self.__theta[6] = self.delta * self.__l / self.__d
+        self.__theta[6] = self.delta * self.L / self.D
         self.__Theta[6] = int(self.__theta[6] * 180 / math.pi)
 
     def get_radian(self):
@@ -110,23 +109,15 @@ class Model(init.Parameters):
 
         Te_soft = T[0] @ T[1] @ T[2] @ T[3] @ T[4] @ T[5] @ T[6] @ self.M_all[6]
         Te = T[0] @ T[1] @ T[2] @ T[3] @ T[4] @ T[5] @ self.M_all[5]
+        T6_e = np.zeros((4, 4), dtype=float)
+        T6_e[:3, :3] = model_function.rot(model_function.screw(self.omega[6]), self.__theta[6])
+        T6_e[:3, 3:4] = model_function.delta_vector(self.delta, self.L, self.D)
+        T6_e[3, 3] = 1
+        Te_soft = Te @ T6_e
         self.Te = Te
         self.T_all = T
         self.T = Te_soft
-        beta = math.atan2(-self.T[2, 0], math.sqrt(self.T[0, 0] ** 2 + self.T[1, 0] ** 2))
-        if abs(beta - math.pi / 2) < 0.00001:
-            alpha = math.atan2(self.T[0, 1], self.T[1, 1])
-            gamma = 0
-        elif abs(beta + math.pi / 2) < 0.00001:
-            alpha = -math.atan2(self.T[0, 1], self.T[1, 1])
-            gamma = 0
-        else:
-            alpha = math.atan2(self.T[2, 1] / math.cos(beta), self.T[2, 2] / math.cos(beta))
-            gamma = math.atan2(self.T[1, 0] / math.cos(beta), self.T[0, 0] / math.cos(beta))
-        self.__pos[:3, 0] = self.T[:3, 3]
-        self.__pos[3, 0] = alpha
-        self.__pos[4, 0] = beta
-        self.__pos[5, 0] = gamma
+        self.__pos = trans_matrix2position(Te_soft)
         # return Te
 
     def jacobi(self):
@@ -293,7 +284,77 @@ class Model(init.Parameters):
         # print(u)
         return u, X_get
 
+    def inverse_kinematics_opt(self, xs, M=10, N=30, T=1, alpha=1e-1):
+        x0 = self.get_position().copy()
+        v_old = np.zeros((7, 1), dtype=float)
+        Xs = np.zeros((6, M), dtype=float)
+        Yd = np.zeros((6 * M + 6, 1), dtype=float)
+        Ys = np.zeros((6 * M + 6, 1), dtype=float)
+        X_get = np.zeros((6 * M + 6, 1), dtype=float)
+        res = []
+        for j in range(M + 1):
+            for k in range(6):
+                Yd[6 * j + k, 0] = (xs[k] - x0[k]) * j / M + x0[k]
+        for i in range(M):
+            for j in range(6):
+                Xs[j, i] = (xs[j] - x0[j]) * (i + 1) / M + x0[j]
+        for i in range(M):
+            Yd_tmp = np.zeros((6 * N + 6, 1), dtype=float)
+            for j in range(N + 1):
+                for k in range(6):
+                    Yd_tmp[6 * j + k, 0] = (Xs[k, i] - x0[k]) * j / N + x0[k]
+            u, X_get_tmp = self.model_opt(v_old, Yd_tmp[6:6*N+6, ], N, T, alpha)
+            X_get[6 * i + 6:6 * i + 12] = X_get_tmp[6 * N - 6:, ]
+            nu = self.get_radian().copy()
+            for j in range(1, N):
+                u[j * 7:7 * j + 7] += u[j * 7 - 7:7 * j]
+            for j in range(N):
+                for k in range(7):
+                    nu[k] += u[7 * j + k] * T
+            self.set_radians(nu)
+            res.append(nu)
+            Ys[i * 6 + 6:i * 6 + 12, ] = self.get_position()
+            # print(n.get_position())
+            x0 = self.get_position().copy()
+            if model_function.distance(Ys[i * 6:i * 6:12, ], Yd[i * 6 + 6:i * 6 + 12:, ]) > 100:  # This maybe work
+                i -= 1
+        return res
 
+
+def position2trans_matrix(position):
+    T = np.zeros((4, 4), dtype=float)
+    Rx = np.matrix([[1, 0, 0],
+                    [0, math.cos(position[3]), -math.sin(position[3])],
+                    [0, math.sin(position[3]), math.cos(position[3])]], dtype=float)
+    Ry = np.matrix([[math.cos(position[4]), 0, math.sin(position[4])],
+                    [0, 1, 0],
+                    [-math.sin(position[4]), 0, math.cos(position[4])]], dtype=float)
+    Rz = np.matrix([[math.cos(position[5]), -math.sin(position[5]), 0],
+                    [math.sin(position[5]), math.cos(position[5]), 0],
+                    [0, 0, 1]], dtype=float)
+    T[:3, :3] = Rz @ Ry @ Rx
+    T[:3, 3:4] = position[:3, 0:1]
+    T[3, 3] = 1
+    return T
+
+
+def trans_matrix2position(T):
+    pos = np.zeros((6, 1), dtype=float)
+    beta = math.atan2(-T[2, 0], math.sqrt(T[0, 0] ** 2 + T[1, 0] ** 2))
+    if abs(beta - math.pi / 2) < 0.00001:
+        alpha = math.atan2(T[0, 1], T[1, 1])
+        gamma = 0
+    elif abs(beta + math.pi / 2) < 0.00001:
+        alpha = -math.atan2(T[0, 1], T[1, 1])
+        gamma = 0
+    else:
+        alpha = math.atan2(T[2, 1] / math.cos(beta), T[2, 2] / math.cos(beta))
+        gamma = math.atan2(T[1, 0] / math.cos(beta), T[0, 0] / math.cos(beta))
+    pos[:3, 0] = T[:3, 3]
+    pos[3, 0] = alpha
+    pos[4, 0] = beta
+    pos[5, 0] = gamma
+    return pos
 def func_opt(H, c):
     v = lambda x: 1 / 2 * x.T @ H @ x + c @ x
     return v

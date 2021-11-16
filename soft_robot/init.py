@@ -9,10 +9,10 @@ import model_function
 class Parameters:
 
     omega = [[0, 0, 1], [0, 1, 0], [0, 1, 0], [0, 0, 1], [0, 1, 0], [0, 0, 1], [-1, 0, 0]]
-    q = [np.matrix([[0], [0], [242]], dtype=float), np.matrix([[0], [0], [242]], dtype=float),
-         np.matrix([[0], [0], [467]], dtype=float), np.matrix([[0], [0], [695.86]], dtype=float),
-         np.matrix([[0], [0], [695.86]], dtype=float), np.matrix([[0], [0], [745.86]], dtype=float),
-         np.matrix([[0], [0], [795.86]], dtype=float)]
+    q = [np.matrix([[0], [0], [242]], dtype=float),
+         np.matrix([[0], [0], [242]], dtype=float), np.matrix([[0], [0], [467]], dtype=float),
+         np.matrix([[0], [0], [695.86]], dtype=float), np.matrix([[0], [0], [695.86]], dtype=float),
+         np.matrix([[0], [0], [745.86]], dtype=float), np.matrix([[0], [0], [795.86]], dtype=float)]
 
     S = [np.matrix([[0], [0], [0], [0], [0], [0]], dtype=float), np.matrix([[0], [0], [0], [0], [0], [0]], dtype=float),
          np.matrix([[0], [0], [0], [0], [0], [0]], dtype=float), np.matrix([[0], [0], [0], [0], [0], [0]], dtype=float),

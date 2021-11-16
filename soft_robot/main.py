@@ -19,7 +19,7 @@ if __name__ == '__main__':
     # ctl = control.Control(lst=['COM5'])
     # thetas = [[1.73, 0, 0, 0, 0, 0, 0.5], [0, 0, 0, 0, 0, 0, 0.5]]
     # ctl.auto_run(thetas)
-    m = model.Model([0.1, 0.1, -0.1, 0.1, 0.1, 0.2, 0])
+    m = model.Model([0.5, 0.1, 0.1, -0.2, 0.4, 0, 0.1])
     print(m.get_position())
     # print(m.J)
     # m.J[:, :6] = m.jacobi_DH()
@@ -27,7 +27,7 @@ if __name__ == '__main__':
     xs = np.matrix([[0], [0], [795.86], [0], [0], [0]], dtype=float)
     x0 = m.get_position().copy()
     v_old = np.zeros((7, 1), dtype=float)
-    M = 10  # 套娃的次数
+    M = 40  # 套娃的次数
     N = 30  # 迭代的次数
     T = 1
     alpha = 1e-1
@@ -49,17 +49,18 @@ if __name__ == '__main__':
             for k in range(6):
                 Yd_tmp[6 * j + k, 0] = (Xs[k, i] - x0[k]) * j / N + x0[k]
         # print(Yd)
+        nu = m.get_radian().copy()
         u, X_get_tmp = m.model_opt(v_old, Yd_tmp[6:6*N+6, ], N, T, alpha)
         X_get[6*i+6:6*i+12] = X_get_tmp[6*N-6:, ]
-        nu = m.get_radian().copy()
+
         for j in range(1, N):
             u[j*7:7*j+7] += u[j*7-7:7*j]
         for j in range(N):
             for k in range(7):
                 nu[k] += u[7 * j + k]*T
             # print(nu)
-        m.set_radians(nu)
-        Ys[i*6+6:i*6+12, ] = m.get_position()
+        m.set_calculation(nu)
+        Ys[i*6+6:i*6+12, ] = m.get_position().copy()
         # print(n.get_position())
         x0 = m.get_position().copy()
         if model_function.distance(Ys[i*6:i*6:12, ], Yd[i*6+6:i*6+12:, ]) > 100:  # This maybe work
