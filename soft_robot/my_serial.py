@@ -11,9 +11,10 @@ from ctypes import create_string_buffer
 
 class Serial:
     def __init__(self, port=None, band=115200, check='无校验位', timeout=2, bytesize=8, stopbits=1):
-        if port is not None:
+        try:
             self.port = serial.Serial(port, band, timeout=timeout, bytesize=bytesize, stopbits=stopbits)
-
+        except:
+            print("连接失败！")
     def close_port(self):
         if self.port != None:
             self.port.close()

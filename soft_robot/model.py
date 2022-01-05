@@ -39,6 +39,7 @@ class Model(init.Parameters):
         self.delta = self.__theta[6] * self.D / self.L
         self.change_q7(model_function.delta_vector(self.delta, self.L, self.D))
         self.init_S()
+        # print(self.S)
         for i in range(7):
             self.__Theta[i] = int(self.__theta[i] * 180 / math.pi)
         self.J = np.zeros((6, len(self.omega)), dtype=float)
@@ -355,6 +356,7 @@ def trans_matrix2position(T):
     pos[4, 0] = beta
     pos[5, 0] = gamma
     return pos
+
 def func_opt(H, c):
     v = lambda x: 1 / 2 * x.T @ H @ x + c @ x
     return v
